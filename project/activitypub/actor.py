@@ -57,6 +57,10 @@ class ActorManager:
                 "id": f"{self.actor_id}#main-key",
                 "owner": self.actor_id,
                 "publicKeyPem": self.public_key_pem
+            },
+            "endpoints": {
+                "id": f"{self.actor_id}#endpoints",
+                "uploadMedia": f"{self.actor_id}/endpoints/uploadMedia"
             }
         }
     
