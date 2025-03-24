@@ -69,8 +69,9 @@ async def send_text_post(content: str):
         }
     }
 
-    # Directly update the last_activity in the inbox/outbox manager
-    inbox_outbox_manager.last_activity = activity
+    # Send the activity to the outbox
+    response = await inbox_outbox_manager.handle_outbox(activity)
+    
     return activity
 
 async def upload_media(file_data: bytes, filename: str, content_type: str):
@@ -158,8 +159,9 @@ async def send_check_in(content: str, latitude: float, longitude: float, image_d
         }
     }
 
-    # Directly update the last_activity in the inbox/outbox manager
-    inbox_outbox_manager.last_activity = activity
+    # Send the activity to the outbox
+    response = await inbox_outbox_manager.handle_outbox(activity)
+    
     return activity
 
 async def test_activitypub():

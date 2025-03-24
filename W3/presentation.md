@@ -26,7 +26,7 @@
 
 - Outbox serves to both register Activities on the server (for internal purposes) as well as to communicate with other servers
 
-- Similar to JWT, ActivityPub uses HTTP Signatures for auth and verification:
+- ActivityPub uses HTTP Signatures for auth and verification:
   - (request-target): HTTP method and path ('post /users/beebo/outbox')
   - host: server's hostname
   - date: current timestamp

@@ -6,7 +6,7 @@ Handles actor creation and webfinger protocol
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
-from typing import Dict, Any, List
+from typing import Dict, Any
 
 class ActorManager:
     def __init__(self, local_domain: str, actor_name: str, display_name: str, public_key_pem: str):

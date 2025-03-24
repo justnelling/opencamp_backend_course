@@ -57,27 +57,43 @@ class InboxOutboxManager:
         else:
             raise HTTPException(status_code=400, detail='Activity type not supported')
     
-    async def handle_outbox(self, request: Request):
-        """Process outgoing activities from this actor."""
-        activity = await request.json()
+    async def handle_outbox(self, request_or_activity):
+        """Process outgoing activities from this actor.
+        
+        Args:
+            request_or_activity: Either a FastAPI Request object or an activity dictionary
+        """
+        # Determine if we received a Request object or an activity dictionary
+        if hasattr(request_or_activity, 'json'):
+            # It's a Request object
+            activity = await request_or_activity.json()
+            request = request_or_activity
+        else:
+            # It's an activity dictionary
+            activity = request_or_activity
+            request = None
         
         # Store the activity
         self.last_activity = activity
         
-        # Sign the response
-        headers = await generate_http_signature(
-            request, 
-            self.private_key, 
-            f"{self.actor_id}#main-key",
-            self.local_domain
-        )
-        
-        # Create and return the response
-        response = JSONResponse(content=activity, status_code=202)
-        for key, value in headers.items():
-            response.headers[key] = value
-        
-        return response
+        # If we have a request, sign the response
+        if request:
+            headers = await generate_http_signature(
+                request, 
+                self.private_key, 
+                f"{self.actor_id}#main-key",
+                self.local_domain
+            )
+            
+            # Create and return the response with signatures
+            response = JSONResponse(content=activity, status_code=202)
+            for key, value in headers.items():
+                response.headers[key] = value
+            
+            return response
+        else:
+            # No request, just return the activity
+            return JSONResponse(content=activity, status_code=202)
     
     async def handle_outbox_get(self):
         """Retrieve the latest activity from the outbox."""
