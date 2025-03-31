@@ -19,10 +19,13 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.backends import default_backend
 from typing import Optional
+from PIL import Image
+import aiofiles
 
 # Import our modules
-from actor import ActorManager
-from inbox_outbox import InboxOutboxManager
+from .actor import ActorManager
+from .inbox_outbox import InboxOutboxManager
+from .signature import generate_http_signature
 
 # Server configuration
 LOCAL_DOMAIN = "127.0.0.1:8080"
@@ -50,6 +53,10 @@ public_key_pem = public_key.public_bytes(
 actor_id = f"https://{LOCAL_DOMAIN}/users/{ACTOR_NAME}"
 actor_manager = ActorManager(LOCAL_DOMAIN, ACTOR_NAME, DISPLAY_NAME, public_key_pem)
 inbox_outbox_manager = InboxOutboxManager(actor_id, ACTOR_NAME, LOCAL_DOMAIN, private_key)
+
+############################################
+# ActivityPub endpoints
+############################################
 
 async def send_text_post(content: str):
     """Creates and sends a text-based post (Create activity)"""
@@ -181,7 +188,7 @@ async def test_activitypub():
         try:
             media_file = b"Hello World!"
             filename = "test.txt"
-            content_type = "text/plain" # 
+            content_type = "text/plain"
             image_data = await upload_media(media_file, filename, content_type)
             print("Media file uploaded successfully!")
             
@@ -213,86 +220,6 @@ app.mount("/media", StaticFiles(directory=MEDIA_DIR), name="media")
 # Register routes
 actor_manager.register_routes(app)
 inbox_outbox_manager.register_routes(app)
-
-# Media upload endpoint
-@app.post(f"/users/{ACTOR_NAME}/endpoints/uploadMedia")
-async def upload_media_endpoint(file: UploadFile = File(...)):
-    """
-    Handle media upload according to ActivityPub protocol
-    """
-    file_content = await file.read()
-    media_info = await upload_media(file_content, file.filename, file.content_type)
-    return JSONResponse(content=media_info, status_code=202)
-
-# Check-in endpoint
-@app.post(f"/users/{ACTOR_NAME}/check-in")
-async def check_in_endpoint(
-    content: str = Form(...),
-    latitude: float = Form(...),
-    longitude: float = Form(...),
-    location_name: Optional[str] = Form(None),
-    image: UploadFile = File(...)
-):
-    """
-    Handle check-in with location and image
-    """
-    # First upload the image
-    file_content = await image.read()
-    image_data = await upload_media(file_content, image.filename, image.content_type)
-    
-    # Then create the check-in activity
-    activity = await send_check_in(content, latitude, longitude, image_data, location_name)
-    
-    return JSONResponse(content=activity, status_code=202)
-
-# Combined media upload and check-in endpoint (follows ActivityPub MediaUpload spec)
-@app.post(f"/users/{ACTOR_NAME}/endpoints/uploadMedia/check-in")
-async def upload_media_check_in(request: Request):
-    """
-    Handle combined media upload and check-in according to ActivityPub MediaUpload spec
-    """
-    form_data = await request.form()
-    
-    # Parse the JSON-LD object from the form
-    activity_data = form_data.get("object")
-    if not activity_data:
-        raise HTTPException(status_code=400, detail="Missing 'object' field in form data")
-    
-    # Get the file from the form
-    image = form_data.get("file")
-    if not image or not isinstance(image, UploadFile):
-        raise HTTPException(status_code=400, detail="Missing or invalid 'file' field in form data")
-    
-    # Extract location data from the activity
-    try:
-        import json
-        activity_json = json.loads(activity_data)
-        object_data = activity_json.get("object", {})
-        
-        # Get content
-        content = object_data.get("summary", "")
-        
-        # Get location data
-        location = object_data.get("location", {})
-        latitude = location.get("latitude", 0.0)
-        longitude = location.get("longitude", 0.0)
-        location_name = location.get("name", None)
-        
-        # Upload the image
-        file_content = await image.read()
-        image_data = await upload_media(file_content, image.filename, image.content_type)
-        
-        # Create the check-in activity
-        activity = await send_check_in(content, latitude, longitude, image_data, location_name)
-        
-        # Return the activity with a 202 Accepted status
-        return JSONResponse(
-            content=activity,
-            status_code=202,
-            headers={"Location": activity["id"]}
-        )
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Error processing request: {str(e)}")
 
 if __name__ == "__main__":
     uvicorn.run(app, host="127.0.0.1", port=8080)

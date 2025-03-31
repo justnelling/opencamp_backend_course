@@ -7,7 +7,8 @@ Handles inbox and outbox functionality for ActivityPub
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
+from datetime import datetime
 
 from signature import generate_http_signature
 
@@ -29,7 +30,7 @@ class InboxOutboxManager:
         self.actor_name = actor_name
         self.local_domain = local_domain
         self.private_key = private_key
-        self.last_activity = None
+        self.activities: List[Dict[str, Any]] = []
     
     def register_routes(self, app: FastAPI):
         """Register inbox/outbox routes with the FastAPI app."""
@@ -53,6 +54,8 @@ class InboxOutboxManager:
         """Process incoming activities from other actors."""
         if activity.type == 'Create':
             print(f"Received note: {activity.object['content']}")
+            # Store incoming activities in the collection
+            self.activities.append(activity.dict())
             return JSONResponse(content={'message': 'Activity Received'}, status_code=202)
         else:
             raise HTTPException(status_code=400, detail='Activity type not supported')
@@ -73,8 +76,8 @@ class InboxOutboxManager:
             activity = request_or_activity
             request = None
         
-        # Store the activity
-        self.last_activity = activity
+        # Store the activity in our collection
+        self.activities.append(activity)
         
         # If we have a request, sign the response
         if request:
@@ -96,10 +99,14 @@ class InboxOutboxManager:
             return JSONResponse(content=activity, status_code=202)
     
     async def handle_outbox_get(self):
-        """Retrieve the latest activity from the outbox."""
-        if self.last_activity:
-            content = self.last_activity['object']['content']
-            print("Content from outbox:", content)
-            return JSONResponse(content=self.last_activity)
-        else:
-            raise HTTPException(status_code=404, detail='Outbox is empty')
+        """Retrieve the collection of activities from the outbox."""
+        # Create an ordered collection of activities
+        collection = {
+            "@context": "https://www.w3.org/ns/activitystreams",
+            "type": "OrderedCollection",
+            "id": f"{self.actor_id}/outbox",
+            "totalItems": len(self.activities),
+            "orderedItems": self.activities
+        }
+        
+        return JSONResponse(content=collection)
