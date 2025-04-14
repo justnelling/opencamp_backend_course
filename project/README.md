@@ -1,6 +1,11 @@
-# Opencamp Week 2 Assignment
+# Opencamp Assignment
 
-Proof of concept for an ActivityPub server setup where we can upload 1 text-based post
+Proof of concept for a decentralised social media app where users can do:
+
+1. upload photos of their location
+2. upload GPS coordinates of their location
+
+check-ins similar to swarm / foursquare
 
 ## Project Structure
 
@@ -10,44 +15,58 @@ The project contains several implementations exploring different aspects of the 
 
 A vanilla ActivityPub server implementation that focuses on the core protocol without additional features. This implementation explores the fundamental concepts of ActivityPub including actors, objects, and activities.
 
-### `/project/mastodon/client`
+### `/project/mastodon_client`
 
 A client implementation that reads from a public Mastodon instance. This demonstrates how to interact with existing Mastodon servers using their API.
 
-### `/project/mastodon/server`
+### `/project/mastodon`
 
-Our main implementation that builds a Mastodon-compatible server. This is integrated with:
+Our main implementation that builds a Mastodon-compatible server with the following components:
 
-- `/project/mastodon/frontend` - A web interface for interacting with the server
-- `/project/database` - CockroachDB integration for persistent storage
+- `/server` - Core server implementation with:
+  - FastAPI endpoints
+  - ActivityPub protocol implementation
+  - Queue system for federation
+  - Database integration
+- `/frontend` - Streamlit-based web interface
+- `/cockroachdb_setup` - Database initialization and schema
 
-This implementation combines Mastodon's features with our own database backend, providing a complete social media platform.
+## Core Components
 
-## Core ActivityPub architecture:
+### ActivityPub Architecture
 
 - Actor: fundamental primitive component of the social web (think like traditional 'account', but buffed)
+- Defines a core 'distributed event log' architectural model for the open social web
+- Server-to-Server (S2S) protocol for distributing Objects and Activities
+- Client-to-Server (C2S) protocol for client software interaction
+- ActivityStreams 2 (AS2) core data model
+- Linked Data (JSON-LD) for data model extensions
 
-- Defines a core 'distributed event log' architectural model for the open social web: to model any social interaction, use an extensible Object, wrapped in an Activity.
+### Queue System
 
-- Defines a Server-to-Server (S2S) protocol for distributing Objects and Activities to interested parties
+The server implements a RabbitMQ-based queue system for handling ActivityPub federation:
 
-- Defines a Client-to-Server (C2S) protocol for client software to interact with Actors and their data
+- Three main queues:
+  - `activitypub_outbox`: New activities waiting to be processed
+  - `activitypub_processing`: Activities currently being processed
+  - `activitypub_failed`: Failed activities for retry
+- Features:
+  - Durable queues (survive RabbitMQ restarts)
+  - Message persistence
+  - Automatic retry mechanism (up to 3 attempts)
+  - Fair distribution of work
 
-- Uses the ActivityStreams 2 (AS2) core data model to describe commonly used social web activities, and the corresponding ActivityStreams Vocabulary that describes common extensions to AS2
+### Database Integration
 
-- Uses Linked Data (JSON-LD) as decentralized mechanism for publishing data model extensions
+The server uses CockroachDB for persistent storage with:
 
-## Database Integration
-
-The server now uses CockroachDB for persistent storage. Key features:
-
-- User accounts with password-based authentication
+- User accounts and authentication
 - Status storage with media attachments
 - Hashtag support
 - Follower/Following relationships
 - Media attachments for posts
 
-### Database Setup
+#### Database Setup
 
 1. Start CockroachDB:
 
@@ -140,11 +159,24 @@ The server is built with:
 
 - FastAPI for the web framework
 - CockroachDB for the database
+- RabbitMQ for the queue system
 - PyJWT for authentication
 - Python 3.x
 
-To run the server:
+### Running the Server
+
+1. Start RabbitMQ:
+
+```bash
+rabbitmq-server
+```
+
+2. Start the server:
 
 ```bash
 uvicorn project.mastodon.server.main:app --reload
 ```
+
+### Testing
+
+See the testing documentation in `/project/mastodon/README.md` for detailed instructions on testing the implementation using curl commands.
