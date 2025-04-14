@@ -1,5 +1,7 @@
 # W3 assignment
 
+https://docs.google.com/presentation/d/1BVjYlkN40csW6F5i7Q_GcLRprsUKuzX53B8ElHNvEM8/edit?slide=id.g342e87432d7_0_3251#slide=id.g342e87432d7_0_3251
+
 ## Core ActivityPub architecture:
 
 - Actor: fundamental primitive component of the social web (think like traditional 'account', but buffed)
@@ -82,5 +84,5 @@
    - streamlit, or lightweight frontend
 
 5. Hosting options
-   - AWS (really want to try)
+   - AWS
    - Digital Ocean
