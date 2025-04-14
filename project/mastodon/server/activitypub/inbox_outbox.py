@@ -1,14 +1,14 @@
 """
-Mastodon Inbox/Outbox Implementation
+ActivityPub Inbox/Outbox
 
-This module implements the Mastodon inbox and outbox models for the server.
-It handles storing and retrieving statuses and other activities.
+This module implements the ActivityPub inbox and outbox models.
 """
 
 from datetime import datetime
 from typing import Dict, List, Optional
 import re
-from database import db
+from ..database import db
+from ..queue import ActivityQueue
 
 class Inbox:
     """Handles incoming activities."""
@@ -54,12 +54,14 @@ class Outbox:
     
     def __init__(self):
         """Initialize outbox."""
-        # We'll use the database for statuses
-        pass
+        # Initialize queue system
+        self.queue = ActivityQueue()
         
     def add_status(self, status: Dict):
         """
-        Add status to outbox.
+        1. store to database
+        2. create activity
+        3. add activity to queue
         
         Args:
             status: Status to add
@@ -101,6 +103,25 @@ class Outbox:
                 hashtag = db.create_hashtag(hashtag_name)
                 if hashtag:
                     db.link_status_to_hashtag(db_status['id'], hashtag['id'])
+                    
+            # Create ActivityPub activity
+            activity = {
+                "@context": "https://www.w3.org/ns/activitystreams",
+                "type": "Create",
+                "actor": f"/users/{username}",
+                "object": {
+                    "type": "Note",
+                    "id": f"/statuses/{db_status['id']}",
+                    "content": db_status['content'],
+                    "published": db_status['created_at'].isoformat(),
+                    "attributedTo": f"/users/{username}",
+                    "to": ["https://www.w3.org/ns/activitystreams#Public"],
+                    "cc": [f"/users/{username}/followers"]
+                }
+            }
+            
+            # Queue activity for delivery
+            self.queue.enqueue_activity(activity)
         
     def get_statuses(
         self,

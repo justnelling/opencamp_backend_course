@@ -5,8 +5,8 @@ This package provides a Mastodon server implementation with FastAPI.
 """
 
 from .main import app
-from .signature import verify_server_signature
-from .actor import Actor
-from .inbox_outbox import Inbox, Outbox
+from .activitypub.signature import verify_server_signature
+from .activitypub import Actor
+from .activitypub.inbox_outbox import Inbox, Outbox
 
 __all__ = ['app', 'verify_server_signature', 'Actor', 'Inbox', 'Outbox'] 

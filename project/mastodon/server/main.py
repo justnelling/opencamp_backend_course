@@ -23,10 +23,9 @@ import uvicorn
 import re
 from jose import JWTError, jwt
 
-from signature import verify_server_signature
-from actor import Actor
-from inbox_outbox import Inbox, Outbox
-from database import db
+from mastodon.server.activitypub import Actor, Inbox, Outbox, verify_server_signature
+from mastodon.server.database import db
+from mastodon.server.auth import Token, LoginRequest, AccountCreate, create_access_token, get_current_user
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -53,41 +52,6 @@ outbox = Outbox()
 MEDIA_DIR = Path("media")
 MEDIA_DIR.mkdir(exist_ok=True)
 
-# Add JWT configuration
-SECRET_KEY = "your-secret-key"  # In production, use a secure secret key
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
-
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
-
-class Token(BaseModel):
-    access_token: str
-    token_type: str
-
-class LoginRequest(BaseModel):
-    username: str
-    password: str
-
-def create_access_token(data: dict):
-    to_encode = data.copy()
-    expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-    return encoded_jwt
-
-async def get_current_user(token: str = Depends(oauth2_scheme)):
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        username: str = payload.get("sub")
-        if username is None:
-            raise HTTPException(status_code=401, detail="Invalid authentication credentials")
-        user = db.get_user(username)
-        if user is None:
-            raise HTTPException(status_code=401, detail="User not found")
-        return user
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Invalid authentication credentials")
-
 class StatusCreate(BaseModel):
     """Model for status creation request."""
     status: str
@@ -95,12 +59,6 @@ class StatusCreate(BaseModel):
     latitude: Optional[float] = None
     longitude: Optional[float] = None
     visibility: str = "public"
-
-class AccountCreate(BaseModel):
-    """Model for account creation request."""
-    username: str
-    password: str
-    email: str
 
 def format_account(user: dict) -> dict:
     """
@@ -130,7 +88,7 @@ def format_account(user: dict) -> dict:
         "header_static": user['header_url'] or "https://example.com/header.jpg",
         "followers_count": len(db.get_followers(user['id'])) if 'id' in user else 0,
         "following_count": len(db.get_following(user['id'])) if 'id' in user else 0,
-        "statuses_count": len(db.get_user_statuses(user['id'])) if 'id' in user else 0,
+        "statuses_count": len(db.get_user_statuses(user['id'], limit=20, since_id=None, max_id=None)) if 'id' in user else 0,
         "last_status_at": None,
         "emojis": [],
         "fields": []
@@ -249,31 +207,18 @@ async def create_status(
             "visibility": db_status['visibility'],
             "sensitive": db_status['sensitive'],
             "spoiler_text": db_status['spoiler_text'] or "",
-            "account": {
-                "id": f"/users/{current_user['username']}",
-                "username": current_user['username'],
-                "acct": current_user['username'],
-                "display_name": current_user['display_name'] or current_user['username'],
-                "locked": False,
-                "bot": False,
-                "discoverable": True,
-                "group": False,
-                "created_at": current_user['created_at'].isoformat(),
-                "note": current_user['bio'] or "",
-                "url": f"https://example.com/users/{current_user['username']}",
-                "avatar": current_user['avatar_url'] or "https://example.com/avatar.jpg",
-                "avatar_static": current_user['avatar_url'] or "https://example.com/avatar.jpg",
-                "header": current_user['header_url'] or "https://example.com/header.jpg",
-                "header_static": current_user['header_url'] or "https://example.com/header.jpg",
-                "followers_count": len(db.get_followers(current_user['id'])),
-                "following_count": len(db.get_following(current_user['id'])),
-                "statuses_count": len(db.get_user_statuses(current_user['id'])),
-                "last_status_at": None,
-                "emojis": [],
-                "fields": []
-            },
+            "account": format_account(current_user),
             "media_attachments": [],
-            "location": None
+            "mentions": [],
+            "tags": [],
+            "emojis": [],
+            "reblogs_count": 0,
+            "favourites_count": 0,
+            "reblogged": False,
+            "favourited": False,
+            "muted": False,
+            "bookmarked": False,
+            "pinned": False
         }
         
         # Add location if present
@@ -284,14 +229,14 @@ async def create_status(
                 "coordinates": [db_status['longitude'], db_status['latitude']]
             }
             
-        # Get media attachments
+        # Add media attachments
         media_attachments = db.get_status_media(db_status['id'])
         status_data["media_attachments"] = [
             {
                 "id": media['id'],
                 "type": media['file_type'],
-                "url": media['file_path'],
-                "preview_url": media['file_path'],
+                "url": media['url'],
+                "preview_url": media['url'],
                 "remote_url": None,
                 "text_url": None,
                 "description": media['description'] or None,
@@ -321,7 +266,7 @@ async def get_public_timeline(
         max_id: Return only statuses older than this ID
         
     Returns:
-        List of status dicts
+        List of statuses
     """
     try:
         # Get statuses from database
@@ -346,35 +291,13 @@ async def get_public_timeline(
                 "visibility": db_status['visibility'],
                 "sensitive": db_status['sensitive'],
                 "spoiler_text": db_status['spoiler_text'] or "",
-                "account": {
-                    "id": f"/users/{user['username']}",
-                    "username": user['username'],
-                    "acct": user['username'],
-                    "display_name": user['display_name'] or user['username'],
-                    "locked": False,
-                    "bot": False,
-                    "discoverable": True,
-                    "group": False,
-                    "created_at": user['created_at'].isoformat(),
-                    "note": user['bio'] or "",
-                    "url": f"https://example.com/users/{user['username']}",
-                    "avatar": user['avatar_url'] or "https://example.com/avatar.jpg",
-                    "avatar_static": user['avatar_url'] or "https://example.com/avatar.jpg",
-                    "header": user['header_url'] or "https://example.com/header.jpg",
-                    "header_static": user['header_url'] or "https://example.com/header.jpg",
-                    "followers_count": len(db.get_followers(user['id'])),
-                    "following_count": len(db.get_following(user['id'])),
-                    "statuses_count": len(db.get_user_statuses(user['id'])),
-                    "last_status_at": None,
-                    "emojis": [],
-                    "fields": []
-                },
+                "account": format_account(user),
                 "media_attachments": [
                     {
                         "id": media['id'],
                         "type": media['file_type'],
-                        "url": media['file_path'],
-                        "preview_url": media['file_path'],
+                        "url": media['url'],
+                        "preview_url": media['url'],
                         "remote_url": None,
                         "text_url": None,
                         "description": media['description'] or None,
@@ -382,7 +305,16 @@ async def get_public_timeline(
                     }
                     for media in media_attachments
                 ],
-                "location": None
+                "mentions": [],
+                "tags": [],
+                "emojis": [],
+                "reblogs_count": 0,
+                "favourites_count": 0,
+                "reblogged": False,
+                "favourited": False,
+                "muted": False,
+                "bookmarked": False,
+                "pinned": False
             }
             
             # Add location if present
@@ -409,7 +341,7 @@ async def get_hashtag_timeline(
     max_id: Optional[str] = None
 ):
     """
-    Get hashtag timeline.
+    Get timeline for a hashtag.
     
     Args:
         hashtag: Hashtag to search for
@@ -418,9 +350,72 @@ async def get_hashtag_timeline(
         max_id: Return only statuses older than this ID
         
     Returns:
-        List of status dicts
+        List of statuses
     """
-    return outbox.get_statuses_by_hashtag(hashtag, limit, since_id, max_id)
+    try:
+        # Get statuses from database
+        db_statuses = db.get_hashtag_timeline(hashtag, limit, since_id, max_id)
+        
+        # Convert to Mastodon format
+        statuses = []
+        for db_status in db_statuses:
+            # Get user
+            user = db.get_user_by_id(db_status['user_id'])
+            if not user:
+                continue
+                
+            # Get media attachments
+            media_attachments = db.get_status_media(db_status['id'])
+            
+            # Create status dict
+            status = {
+                "id": db_status['id'],
+                "created_at": db_status['created_at'].isoformat(),
+                "content": db_status['content'],
+                "visibility": db_status['visibility'],
+                "sensitive": db_status['sensitive'],
+                "spoiler_text": db_status['spoiler_text'] or "",
+                "account": format_account(user),
+                "media_attachments": [
+                    {
+                        "id": media['id'],
+                        "type": media['file_type'],
+                        "url": media['url'],
+                        "preview_url": media['url'],
+                        "remote_url": None,
+                        "text_url": None,
+                        "description": media['description'] or None,
+                        "blurhash": None
+                    }
+                    for media in media_attachments
+                ],
+                "mentions": [],
+                "tags": [],
+                "emojis": [],
+                "reblogs_count": 0,
+                "favourites_count": 0,
+                "reblogged": False,
+                "favourited": False,
+                "muted": False,
+                "bookmarked": False,
+                "pinned": False
+            }
+            
+            # Add location if present
+            if db_status['latitude'] is not None and db_status['longitude'] is not None:
+                status["location"] = {
+                    "name": f"{db_status['latitude']}, {db_status['longitude']}",
+                    "type": "Point",
+                    "coordinates": [db_status['longitude'], db_status['latitude']]
+                }
+            
+            statuses.append(status)
+            
+        return statuses
+        
+    except Exception as e:
+        logger.error(f"Error getting hashtag timeline: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/v1/accounts/{username}/statuses")
 async def get_user_timeline(
@@ -430,18 +425,81 @@ async def get_user_timeline(
     max_id: Optional[str] = None
 ):
     """
-    Get user timeline.
+    Get timeline for a user.
     
     Args:
-        username: Username to fetch timeline for
+        username: Username to fetch statuses for
         limit: Number of statuses to fetch
         since_id: Return only statuses newer than this ID
         max_id: Return only statuses older than this ID
         
     Returns:
-        List of status dicts
+        List of statuses
     """
-    return outbox.get_statuses_by_user(username, limit, since_id, max_id)
+    try:
+        # Get user
+        user = db.get_user(username)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+            
+        # Get statuses from database
+        db_statuses = db.get_user_statuses(user['id'], limit, since_id, max_id)
+        
+        # Convert to Mastodon format
+        statuses = []
+        for db_status in db_statuses:
+            # Get media attachments
+            media_attachments = db.get_status_media(db_status['id'])
+            
+            # Create status dict
+            status = {
+                "id": db_status['id'],
+                "created_at": db_status['created_at'].isoformat(),
+                "content": db_status['content'],
+                "visibility": db_status['visibility'],
+                "sensitive": db_status['sensitive'],
+                "spoiler_text": db_status['spoiler_text'] or "",
+                "account": format_account(user),
+                "media_attachments": [
+                    {
+                        "id": media['id'],
+                        "type": media['file_type'],
+                        "url": media['url'],
+                        "preview_url": media['url'],
+                        "remote_url": None,
+                        "text_url": None,
+                        "description": media['description'] or None,
+                        "blurhash": None
+                    }
+                    for media in media_attachments
+                ],
+                "mentions": [],
+                "tags": [],
+                "emojis": [],
+                "reblogs_count": 0,
+                "favourites_count": 0,
+                "reblogged": False,
+                "favourited": False,
+                "muted": False,
+                "bookmarked": False,
+                "pinned": False
+            }
+            
+            # Add location if present
+            if db_status['latitude'] is not None and db_status['longitude'] is not None:
+                status["location"] = {
+                    "name": f"{db_status['latitude']}, {db_status['longitude']}",
+                    "type": "Point",
+                    "coordinates": [db_status['longitude'], db_status['latitude']]
+                }
+            
+            statuses.append(status)
+            
+        return statuses
+        
+    except Exception as e:
+        logger.error(f"Error getting user timeline: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/v1/accounts/{username}")
 async def get_account(username: str):
@@ -449,43 +507,71 @@ async def get_account(username: str):
     Get account information.
     
     Args:
-        username: Username to fetch account for
+        username: Username to fetch
         
     Returns:
-        Account dict
+        Account information
     """
-    user = db.get_user(username)
-    if not user:
-        raise HTTPException(status_code=404, detail="Not Found")
+    try:
+        # Get user
+        user = db.get_user(username)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+            
+        # Format account
+        return format_account(user)
         
-    return format_account(user)
+    except Exception as e:
+        logger.error(f"Error getting account: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/.well-known/webfinger")
 async def webfinger(resource: str):
     """
-    WebFinger endpoint for Mastodon instance discovery.
+    WebFinger endpoint for instance discovery.
     
     Args:
-        resource: WebFinger resource string
+        resource: Resource to look up
         
     Returns:
         WebFinger response
     """
-    if resource.startswith("acct:"):
-        username = resource[5:]
+    try:
+        # Parse resource
+        if not resource.startswith("acct:"):
+            raise HTTPException(status_code=400, detail="Invalid resource format")
+            
+        username, domain = resource[5:].split("@")
+        
+        # Get user
         user = db.get_user(username)
-        if user:
-            return {
-                "subject": resource,
-                "links": [
-                    {
-                        "rel": "self",
-                        "type": "application/activity+json",
-                        "href": f"/api/v1/accounts/{username}"
-                    }
-                ]
-            }
-    raise HTTPException(status_code=404, detail="Not found")
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+            
+        # Create response
+        return {
+            "subject": resource,
+            "aliases": [
+                f"https://example.com/users/{username}",
+                f"https://example.com/@{username}"
+            ],
+            "links": [
+                {
+                    "rel": "http://webfinger.net/rel/profile-page",
+                    "type": "text/html",
+                    "href": f"https://example.com/users/{username}"
+                },
+                {
+                    "rel": "self",
+                    "type": "application/activity+json",
+                    "href": f"https://example.com/users/{username}"
+                }
+            ]
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in WebFinger: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/v1/accounts")
 async def create_account(account: AccountCreate):
@@ -496,28 +582,30 @@ async def create_account(account: AccountCreate):
         account: Account creation data
         
     Returns:
-        Created account dict
+        Created account information
     """
     try:
-        # Create user in database
+        # Check if username exists
+        existing_user = db.get_user(account.username)
+        if existing_user:
+            raise HTTPException(status_code=400, detail="Username already exists")
+            
+        # Create user
         user = db.create_user(
             username=account.username,
-            password=account.password,
-            display_name=account.username,
-            bio="",
-            avatar_url=None,
-            header_url=None
+            password_hash=account.password,  # In production, hash the password
+            email=account.email
         )
         
         if not user:
-            raise HTTPException(status_code=400, detail="Username already taken")
+            raise HTTPException(status_code=500, detail="Failed to create user")
             
+        # Format account
         return format_account(user)
         
     except Exception as e:
         logger.error(f"Error creating account: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# Add server startup code
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000) 

@@ -1,8 +1,15 @@
 """
-CockroachDB Setup for Mastodon Server
+CockroachDB Schema Management
 
-This script sets up the necessary tables and structure for storing Mastodon data.
-It creates tables for users, statuses, media attachments, and relationships.
+This script is responsible for database schema management and initialization.
+It should be used for:
+1. Initial database setup
+2. Schema migrations
+3. Test data insertion for development
+4. Database reset for testing
+
+This is NOT for application database operations - those are handled by the
+server's database module (project/mastodon/server/database/).
 """
 
 import psycopg2
@@ -11,8 +18,8 @@ from datetime import datetime
 
 # --- Configuration ---
 # Connection string for a local, single-node, insecure CockroachDB instance
-# Using the default 'root' user and 'defaultdb' database.
-CONNECTION_STRING = "postgresql://root@localhost:26257/defaultdb?sslmode=disable"
+# Using the default 'root' user and 'mastodon' database.
+CONNECTION_STRING = "postgresql://root@localhost:26257/mastodon?sslmode=disable"
 
 def drop_tables():
     """Drops all existing tables to allow for schema changes."""
@@ -53,6 +60,7 @@ def create_tables():
                         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                         username VARCHAR(255) UNIQUE NOT NULL,
                         password_hash VARCHAR(255) NOT NULL,
+                        email VARCHAR(255) NOT NULL,
                         display_name VARCHAR(255),
                         bio TEXT,
                         avatar_url TEXT,
@@ -175,8 +183,8 @@ def test_tables():
             with conn.cursor() as cur:
                 # Insert test user
                 cur.execute("""
-                    INSERT INTO users (username, password_hash, display_name, bio)
-                    VALUES ('testuser', '5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8', 'Test User', 'Test user bio')
+                    INSERT INTO users (username, password_hash, email, display_name, bio)
+                    VALUES ('testuser', '5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8', 'test@example.com', 'Test User', 'Test user bio')
                     ON CONFLICT (username) DO NOTHING;
                 """)
                 
