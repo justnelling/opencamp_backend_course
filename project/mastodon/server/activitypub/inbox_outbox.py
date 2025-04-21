@@ -87,41 +87,39 @@ class Outbox:
             longitude=status.get('location', {}).get('coordinates', [None, None])[0]
         )
         
-        if db_status:
-            # Add media attachments
-            for media in status.get('media_attachments', []):
-                db.create_media_attachment(
-                    status_id=db_status['id'],
-                    file_path=media.get('url', ''),
-                    file_type=media.get('type', 'image/jpeg'),
-                    description=media.get('description', '')
-                )
-            
-            # Extract and add hashtags
-            hashtags = re.findall(r'#(\w+)', status.get('content', ''))
-            for hashtag_name in hashtags:
-                hashtag = db.create_hashtag(hashtag_name)
-                if hashtag:
-                    db.link_status_to_hashtag(db_status['id'], hashtag['id'])
-                    
-            # Create ActivityPub activity
-            activity = {
+        # Create activity
+        activity = {
+            "@context": "https://www.w3.org/ns/activitystreams",
+            "id": f"{actor_id}/status/{db_status['id']}",
+            "type": "Create",
+            "actor": actor_id,
+            "published": datetime.now().isoformat(),
+            "to": ["https://www.w3.org/ns/activitystreams#Public"],
+            "object": {
                 "@context": "https://www.w3.org/ns/activitystreams",
-                "type": "Create",
-                "actor": f"/users/{username}",
-                "object": {
-                    "type": "Note",
-                    "id": f"/statuses/{db_status['id']}",
-                    "content": db_status['content'],
-                    "published": db_status['created_at'].isoformat(),
-                    "attributedTo": f"/users/{username}",
-                    "to": ["https://www.w3.org/ns/activitystreams#Public"],
-                    "cc": [f"/users/{username}/followers"]
-                }
+                "id": f"{actor_id}/status/{db_status['id']}/object",
+                "type": "Note",
+                "content": status.get('content', ''),
+                "published": db_status['created_at'].isoformat(),
+                "attributedTo": actor_id,
+                "to": ["https://www.w3.org/ns/activitystreams#Public"]
             }
-            
-            # Queue activity for delivery
-            self.queue.enqueue_activity(activity)
+        }
+        
+        # Add location if present
+        if db_status['latitude'] is not None and db_status['longitude'] is not None:
+            location_name = status.get('location', {}).get('name', f"{db_status['latitude']}, {db_status['longitude']}")
+            activity['object']['location'] = {
+                "type": "Place",
+                "name": location_name,
+                "latitude": db_status['latitude'],
+                "longitude": db_status['longitude']
+            }
+        
+        # Add to queue
+        self.queue.add_activity(activity)
+        
+        return db_status
         
     def get_statuses(
         self,

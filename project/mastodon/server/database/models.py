@@ -101,8 +101,8 @@ class MediaModel:
     def __init__(self, db: Database):
         self.db = db
         
-    def create_media_attachment(self, status_id: str, file_path: str, file_type: str,
-                              description: str = None) -> Dict:
+    def create_media_attachment(self, file_path: str, file_type: str,
+                              description: str = None, status_id: str = None) -> Dict:
         """Create a new media attachment."""
         query = """
             INSERT INTO media_attachments (status_id, file_path, file_type, description)
@@ -115,6 +115,17 @@ class MediaModel:
         """Get media attachments for a status."""
         query = "SELECT * FROM media_attachments WHERE status_id = %s"
         return self.db.execute(query, (status_id,))
+        
+    def update_media_status(self, media_id: str, status_id: str) -> Dict:
+        """Update the status ID of a media attachment."""
+        query = """
+            UPDATE media_attachments 
+            SET status_id = %s 
+            WHERE id::text = %s
+            RETURNING *
+        """
+        result = self.db.execute(query, (status_id, media_id))
+        return result[0] if result else None
 
 class HashtagModel:
     """Hashtag-related database operations."""

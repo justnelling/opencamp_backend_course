@@ -266,7 +266,8 @@ class MastodonClient:
         status: str,
         media_ids: Optional[List[str]] = None,
         latitude: Optional[float] = None,
-        longitude: Optional[float] = None
+        longitude: Optional[float] = None,
+        place_name: Optional[str] = None
     ) -> Dict:
         """
         Create new status.
@@ -276,6 +277,7 @@ class MastodonClient:
             media_ids: Optional list of media attachment IDs
             latitude: Optional latitude for location
             longitude: Optional longitude for location
+            place_name: Optional place name for check-in
             
         Returns:
             Created status dict
@@ -287,6 +289,8 @@ class MastodonClient:
             data['latitude'] = latitude
         if longitude is not None:
             data['longitude'] = longitude
+        if place_name is not None:
+            data['place_name'] = place_name
             
         return await self._make_request(
             'POST',

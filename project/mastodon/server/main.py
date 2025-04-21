@@ -4,7 +4,7 @@ Mastodon Server Implementation
 This module implements a Mastodon-compatible server using FastAPI.
 It provides endpoints for:
 1. Media uploads
-2. Status creation with GPS coordinates
+2. Status creation with location check-ins
 3. Timeline fetching
 4. HTTP signature verification
 """
@@ -17,15 +17,18 @@ from typing import List, Optional
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from pathlib import Path
 import uvicorn
 import re
 from jose import JWTError, jwt
+import uuid
 
-from mastodon.server.activitypub import Actor, Inbox, Outbox, verify_server_signature
-from mastodon.server.database import db
-from mastodon.server.auth import Token, LoginRequest, AccountCreate, create_access_token, get_current_user
+from server.activitypub import Actor, Inbox, Outbox, verify_server_signature
+from server.database import db
+from server.auth import Token, LoginRequest, AccountCreate, create_access_token, get_current_user
+from server.location import LocationService
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -43,14 +46,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Mount media directory
+MEDIA_DIR = Path("media")
+MEDIA_DIR.mkdir(exist_ok=True)
+app.mount("/media", StaticFiles(directory=MEDIA_DIR), name="media")
+
 # Initialize components
 actor = Actor()
 inbox = Inbox()
 outbox = Outbox()
-
-# Create media directory if it doesn't exist
-MEDIA_DIR = Path("media")
-MEDIA_DIR.mkdir(exist_ok=True)
+location_service = LocationService()
 
 class StatusCreate(BaseModel):
     """Model for status creation request."""
@@ -58,6 +63,7 @@ class StatusCreate(BaseModel):
     media_ids: Optional[List[str]] = None
     latitude: Optional[float] = None
     longitude: Optional[float] = None
+    place_name: Optional[str] = None
     visibility: str = "public"
 
 def format_account(user: dict) -> dict:
@@ -110,25 +116,41 @@ async def upload_media(
         Dict containing media attachment info
     """
     try:
-        # Save file
-        file_path = MEDIA_DIR / file.filename
+        # Generate a unique ID for the media
+        media_id = str(uuid.uuid4())
+        
+        # Save file with the media_id as the filename
+        file_extension = os.path.splitext(file.filename)[1]
+        file_path = MEDIA_DIR / f"{media_id}{file_extension}"
+        
+        # Ensure media directory exists
+        os.makedirs(MEDIA_DIR, exist_ok=True)
+        
         with open(file_path, "wb") as f:
             content = await file.read()
             f.write(content)
             
-        # Create media attachment
-        attachment = {
-            "id": str(file_path.stat().st_mtime),
+        # Create media attachment in the database without a status_id
+        attachment = db.create_media_attachment(
+            file_path=f"/media/{file_path.name}",
+            file_type=file.content_type or "image/jpeg",
+            description=description
+        )
+        
+        if not attachment:
+            raise HTTPException(status_code=500, detail="Failed to create media attachment")
+        
+        # Return response in Mastodon format
+        return {
+            "id": attachment['id'],
             "type": "image",
-            "url": f"/media/{file.filename}",
-            "preview_url": f"/media/{file.filename}",
+            "url": f"/media/{file_path.name}",
+            "preview_url": f"/media/{file_path.name}",
             "remote_url": None,
             "text_url": None,
             "description": description,
             "blurhash": None
         }
-        
-        return attachment
         
     except Exception as e:
         logger.error(f"Error uploading media: {e}")
@@ -166,6 +188,20 @@ async def create_status(
         Created status dict
     """
     try:
+        # If place_name is provided but coordinates are not, search for the place
+        if status.place_name and (status.latitude is None or status.longitude is None):
+            logger.info(f"Searching for place: {status.place_name}")
+            place = await location_service.search_place(status.place_name)
+            
+            if place:
+                status.latitude = place['latitude']
+                status.longitude = place['longitude']
+                # Update place_name with the full address from the search
+                status.place_name = place['name']
+                logger.info(f"Found coordinates for {status.place_name}: {status.latitude}, {status.longitude}")
+            else:
+                logger.warning(f"Could not find coordinates for place: {status.place_name}")
+        
         # Create status in database directly
         db_status = db.create_status(
             user_id=current_user['id'],
@@ -190,15 +226,11 @@ async def create_status(
         # Add media attachments if present
         if status.media_ids:
             for media_id in status.media_ids:
-                media_path = MEDIA_DIR / f"{media_id}.jpg"
-                if media_path.exists():
-                    db.create_media_attachment(
-                        status_id=db_status['id'],
-                        file_path=f"/media/{media_path.name}",
-                        file_type="image/jpeg",
-                        description=""
-                    )
-        
+                # Update the media attachment with the new status ID
+                updated_media = db.update_media_status(media_id, db_status['id'])
+                if not updated_media:
+                    logger.warning(f"Could not update media attachment {media_id} with status {db_status['id']}")
+                    
         # Create response in Mastodon format
         status_data = {
             "id": db_status['id'],
@@ -223,8 +255,14 @@ async def create_status(
         
         # Add location if present
         if db_status['latitude'] is not None and db_status['longitude'] is not None:
+            # Get place name from coordinates
+            location_info = await location_service.get_location_info(
+                db_status['latitude'],
+                db_status['longitude']
+            )
+            
             status_data["location"] = {
-                "name": f"{db_status['latitude']}, {db_status['longitude']}",
+                "name": location_info['address'] if location_info else f"{db_status['latitude']}, {db_status['longitude']}",
                 "type": "Point",
                 "coordinates": [db_status['longitude'], db_status['latitude']]
             }
@@ -319,8 +357,14 @@ async def get_public_timeline(
             
             # Add location if present
             if db_status['latitude'] is not None and db_status['longitude'] is not None:
+                # Get place name from coordinates
+                location_info = await location_service.get_location_info(
+                    db_status['latitude'],
+                    db_status['longitude']
+                )
+                
                 status["location"] = {
-                    "name": f"{db_status['latitude']}, {db_status['longitude']}",
+                    "name": location_info['address'] if location_info else f"{db_status['latitude']}, {db_status['longitude']}",
                     "type": "Point",
                     "coordinates": [db_status['longitude'], db_status['latitude']]
                 }
@@ -403,8 +447,14 @@ async def get_hashtag_timeline(
             
             # Add location if present
             if db_status['latitude'] is not None and db_status['longitude'] is not None:
+                # Get place name from coordinates
+                location_info = await location_service.get_location_info(
+                    db_status['latitude'],
+                    db_status['longitude']
+                )
+                
                 status["location"] = {
-                    "name": f"{db_status['latitude']}, {db_status['longitude']}",
+                    "name": location_info['address'] if location_info else f"{db_status['latitude']}, {db_status['longitude']}",
                     "type": "Point",
                     "coordinates": [db_status['longitude'], db_status['latitude']]
                 }
@@ -487,8 +537,14 @@ async def get_user_timeline(
             
             # Add location if present
             if db_status['latitude'] is not None and db_status['longitude'] is not None:
+                # Get place name from coordinates
+                location_info = await location_service.get_location_info(
+                    db_status['latitude'],
+                    db_status['longitude']
+                )
+                
                 status["location"] = {
-                    "name": f"{db_status['latitude']}, {db_status['longitude']}",
+                    "name": location_info['address'] if location_info else f"{db_status['latitude']}, {db_status['longitude']}",
                     "type": "Point",
                     "coordinates": [db_status['longitude'], db_status['latitude']]
                 }

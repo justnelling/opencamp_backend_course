@@ -82,6 +82,7 @@ def create_tables():
                         spoiler_text TEXT,
                         latitude DECIMAL(10, 8),
                         longitude DECIMAL(11, 8),
+                        place_name TEXT,
                         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                         updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                         INDEX (user_id),
@@ -94,7 +95,7 @@ def create_tables():
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS media_attachments (
                         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                        status_id UUID NOT NULL REFERENCES statuses(id),
+                        status_id UUID REFERENCES statuses(id),
                         file_path TEXT NOT NULL,
                         file_type VARCHAR(50) NOT NULL,
                         description TEXT,

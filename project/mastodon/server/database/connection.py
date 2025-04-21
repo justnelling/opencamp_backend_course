@@ -10,6 +10,7 @@ from typing import Dict, List, Optional
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from uuid import UUID
+import hashlib
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -95,10 +96,10 @@ class Database:
 
     def verify_user(self, username: str, password: str) -> Optional[Dict]:
         """Verify user credentials and return user data if valid."""
-        # TODO: Add proper password hashing and verification
+        # Hash the password before comparison
+        password_hash = hashlib.sha256(password.encode()).hexdigest()
         query = "SELECT * FROM users WHERE username = %s AND password_hash = %s"
-        # In production, hash the password before comparing
-        return self.execute(query, (username, password), fetch_one=True)
+        return self.execute(query, (username, password_hash), fetch_one=True)
 
     # --- Status Methods ---
     def create_status(self, user_id: UUID, content: str, visibility: str, sensitive: bool, spoiler_text: Optional[str], latitude: Optional[float], longitude: Optional[float]) -> Optional[Dict]:
@@ -176,7 +177,7 @@ class Database:
         return self.execute(query, tuple(params))
 
     # --- Media Methods ---
-    def create_media_attachment(self, status_id: UUID, file_path: str, file_type: str, description: Optional[str]) -> Optional[Dict]:
+    def create_media_attachment(self, file_path: str, file_type: str, description: Optional[str] = None, status_id: Optional[UUID] = None) -> Optional[Dict]:
         """Create a new media attachment."""
         query = """
             INSERT INTO media_attachments (status_id, file_path, file_type, description)

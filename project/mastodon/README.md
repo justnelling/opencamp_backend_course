@@ -200,21 +200,24 @@ Save the access token from the response for use in subsequent requests:
 export ACCESS_TOKEN="your_access_token_here"
 ```
 
-### 3. Create a Status (Post)
+### 3. Create a Status with Location Check-in
 
-Simple status:
+You can create a status with a location check-in by providing a place name:
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/statuses \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $ACCESS_TOKEN" \
   -d '{
-    "status": "Hello, Mastodon! This is my first post. #test",
-    "visibility": "public"
+    "status": "Check-in at Eiffel Tower! #checkin",
+    "visibility": "public",
+    "place_name": "Eiffel Tower, Paris"
   }'
 ```
 
-Status with location:
+The server will automatically find the coordinates for the place name and include them in the status.
+
+You can also provide coordinates directly if you have them:
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/statuses \
@@ -305,3 +308,4 @@ curl "http://localhost:8000/api/v1/timelines/public?limit=5"
 5. Caching
 6. Advanced search functionality
 7. Notification system
+8. Improved location search with autocomplete

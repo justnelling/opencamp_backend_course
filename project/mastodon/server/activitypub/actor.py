@@ -8,7 +8,7 @@ import json
 import logging
 from datetime import datetime
 
-from mastodon.server.database import db
+from server.database import db
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
