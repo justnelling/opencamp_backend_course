@@ -195,6 +195,17 @@ class Database:
         """
         return self.execute(query, (status_id,))
 
+    def update_media_status(self, media_id: str, status_id: UUID) -> Optional[Dict]:
+        """Update the status_id of a media attachment."""
+        query = """
+            UPDATE media_attachments 
+            SET status_id = %s 
+            WHERE id::text = %s
+            RETURNING id, file_path as url, file_type, description;
+        """
+        result = self.execute(query, (status_id, media_id), fetch_one=True)
+        return result
+
     # --- Relationship Methods ---
     def get_followers(self, user_id: UUID) -> List[Dict]:
         """Get list of users following the given user."""

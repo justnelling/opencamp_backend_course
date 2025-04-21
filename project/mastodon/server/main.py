@@ -18,7 +18,7 @@ from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends, Hea
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from pathlib import Path
 import uvicorn
 import re
@@ -61,6 +61,7 @@ class StatusCreate(BaseModel):
     """Model for status creation request."""
     status: str
     media_ids: Optional[List[str]] = None
+    media_ids_: Optional[List[str]] = Field(None, alias="media_ids[]")  # Add support for media_ids[] format
     latitude: Optional[float] = None
     longitude: Optional[float] = None
     place_name: Optional[str] = None
@@ -224,8 +225,9 @@ async def create_status(
                 db.link_status_to_hashtag(db_status['id'], hashtag['id'])
                 
         # Add media attachments if present
-        if status.media_ids:
-            for media_id in status.media_ids:
+        media_ids = status.media_ids or status.media_ids_  # Try both formats
+        if media_ids:
+            for media_id in media_ids:
                 # Update the media attachment with the new status ID
                 updated_media = db.update_media_status(media_id, db_status['id'])
                 if not updated_media:
@@ -255,33 +257,31 @@ async def create_status(
         
         # Add location if present
         if db_status['latitude'] is not None and db_status['longitude'] is not None:
-            # Get place name from coordinates
-            location_info = await location_service.get_location_info(
-                db_status['latitude'],
-                db_status['longitude']
-            )
+            # Get place name from coordinates using search_place
+            location_info = await location_service.search_place(f"{db_status['latitude']}, {db_status['longitude']}")
             
-            status_data["location"] = {
-                "name": location_info['address'] if location_info else f"{db_status['latitude']}, {db_status['longitude']}",
-                "type": "Point",
-                "coordinates": [db_status['longitude'], db_status['latitude']]
+            status_data["check_in"] = {
+                "name": location_info['name'] if location_info else f"{db_status['latitude']}, {db_status['longitude']}",
+                "latitude": db_status['latitude'],
+                "longitude": db_status['longitude']
             }
             
         # Add media attachments
         media_attachments = db.get_status_media(db_status['id'])
-        status_data["media_attachments"] = [
-            {
-                "id": media['id'],
-                "type": media['file_type'],
-                "url": media['url'],
-                "preview_url": media['url'],
-                "remote_url": None,
-                "text_url": None,
-                "description": media['description'] or None,
-                "blurhash": None
-            }
-            for media in media_attachments
-        ]
+        if media_attachments:
+            status_data["media_attachments"] = [
+                {
+                    "id": media['id'],
+                    "type": media['file_type'],
+                    "url": media['url'],
+                    "preview_url": media['url'],
+                    "remote_url": None,
+                    "text_url": None,
+                    "description": media['description'] or None,
+                    "blurhash": None
+                }
+                for media in media_attachments
+            ]
         
         return status_data
         
