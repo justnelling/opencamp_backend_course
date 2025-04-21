@@ -14,6 +14,7 @@ mastodon/
 │   ├── auth/             # Authentication and authorization
 │   ├── database/         # Database models and operations
 │   ├── media/            # Media handling
+│   ├── location/         # Location services and geocoding
 │   └── queue/            # Background task processing
 ├── cockroachdb_setup/    # Database setup and initialization
 │   ├── cockroachdb.py    # Database schema and initialization
@@ -21,8 +22,32 @@ mastodon/
 ├── frontend/             # Streamlit frontend applications
 │   ├── app_our_server.py # UI for interacting with our server
 │   └── app_client.py     # UI for reading from public Mastodon instances
-└── media/                # Media storage directory
+├── media/                # Media storage directory
+└── setup_and_run.sh      # Consolidated setup and run script
 ```
+
+## Quick Start
+
+The project includes a consolidated setup script that handles all initialization and startup:
+
+```bash
+./setup_and_run.sh
+```
+
+This script will:
+
+1. Install all required dependencies
+2. Start CockroachDB
+3. Initialize the database with test data
+4. Start the FastAPI server
+5. Launch the Streamlit frontend applications
+
+### Test Credentials
+
+For all testing and development, use these standard credentials:
+
+- Username: `testuser`
+- Password: `password`
 
 ## Components
 
@@ -30,54 +55,38 @@ mastodon/
 
 Our custom Mastodon server implementation provides a Mastodon-compatible API with ActivityPub federation support:
 
-1. **Run the Server**
-
-   ```bash
-   uvicorn project.mastodon.server.main:app --reload
-   ```
-
-2. **Server Architecture**
+1. **Server Architecture**
 
    - **API Layer**: RESTful endpoints following Mastodon API conventions
    - **ActivityPub**: Implementation of the ActivityPub protocol for federation
-   - **Authentication**: JWT-based authentication system
+   - **Authentication**: JWT-based authentication system with SHA-256 password hashing
    - **Database**: CockroachDB integration for persistent storage
    - **Media Handling**: Support for media attachments in posts
+   - **Location Services**: Geocoding and place search functionality
    - **Queue System**: Background processing for federation tasks
 
-3. **Available Endpoints**
+2. **Available Endpoints**
    - `/api/v1/media` - Upload media files
    - `/api/v1/statuses` - Create and fetch statuses
    - `/api/v1/timelines/public` - Public timeline
    - `/api/v1/timelines/tag/{hashtag}` - Hashtag timeline
    - `/api/v1/accounts/{username}/statuses` - User timeline
+   - `/api/v1/places/search` - Search for places
    - `/.well-known/webfinger` - Instance discovery
    - `/users/{username}` - User profiles
    - `/inbox` - ActivityPub inbox for federation
    - `/outbox` - ActivityPub outbox for federation
 
-### Database Setup
+### Database Schema
 
-The server uses CockroachDB for persistent storage:
+The server uses CockroachDB with the following schema:
 
-1. **Start CockroachDB**
-
-   ```bash
-   cockroach start-single-node --insecure --listen-addr=localhost:26257
-   ```
-
-2. **Initialize the Database**
-
-   ```bash
-   python project/mastodon/cockroachdb_setup/cockroachdb.py
-   ```
-
-3. **Database Schema**
-   - Users table: Account information and authentication
-   - Statuses table: Posts with content and metadata
-   - Media attachments: Files associated with posts
-   - Relationships: Following/follower connections
-   - Hashtags: Tag information and associations
+- Users table: Account information and authentication
+- Statuses table: Posts with content and metadata
+- Media attachments: Files associated with posts
+- Relationships: Following/follower connections
+- Hashtags: Tag information and associations
+- Places: Location information and coordinates
 
 ### Frontend Applications
 
@@ -88,13 +97,11 @@ The project includes two Streamlit applications:
    - Create and manage posts
    - Upload media attachments
    - View timelines and user profiles
-   - Run with: `streamlit run project/mastodon/frontend/app_our_server.py`
 
 2. **Client UI** (`app_client.py`)
    - Read from public Mastodon instances
    - View public timelines
    - Search hashtags
-   - Run with: `streamlit run project/mastodon/frontend/app_client.py`
 
 ## Dependencies
 
@@ -102,46 +109,10 @@ The project includes two Streamlit applications:
 - Streamlit - Frontend applications
 - aiohttp - Async HTTP client
 - cryptography - HTTP signature handling
-- geopy - Location lookup
+- geopy - Location lookup and geocoding
 - httpx - HTTP client for frontend
 - CockroachDB - Distributed SQL database
 - PyJWT - JWT authentication
-
-## Development
-
-1. Install dependencies:
-
-   ```bash
-   pip install -r project/requirements.txt
-   ```
-
-2. Start the database:
-
-   ```bash
-   cockroach start-single-node --insecure --listen-addr=localhost:26257
-   ```
-
-3. Initialize the database:
-
-   ```bash
-   python project/mastodon/cockroachdb_setup/cockroachdb.py
-   ```
-
-4. Run the server:
-
-   ```bash
-   uvicorn project.mastodon.server.main:app --reload
-   ```
-
-5. Run the frontend:
-
-   ```bash
-   # For interacting with our server
-   streamlit run project/mastodon/frontend/app_our_server.py
-
-   # For reading from public Mastodon instances
-   streamlit run project/mastodon/frontend/app_client.py
-   ```
 
 ## Features
 
@@ -155,6 +126,7 @@ The project includes two Streamlit applications:
 - User profiles
 - WebFinger support
 - GPS coordinate support
+- Location services with geocoding
 - Custom post creation
 - Hashtag support
 - Following/follower relationships
@@ -166,31 +138,20 @@ The project includes two Streamlit applications:
 - Input validation
 - CORS support
 - JWT-based authentication
+- SHA-256 password hashing
 
 ## Testing the Implementation
 
 You can test the Mastodon server implementation using curl commands. Here's a step-by-step guide:
 
-### 1. Create a New User
-
-```bash
-curl -X POST http://localhost:8000/api/v1/accounts \
-  -H "Content-Type: application/json" \
-  -d '{
-    "username": "testuser",
-    "email": "test@example.com",
-    "password": "testpassword123"
-  }'
-```
-
-### 2. Get Access Token
+### 1. Get Access Token
 
 ```bash
 curl -X POST http://localhost:8000/token \
   -H "Content-Type: application/json" \
   -d '{
     "username": "testuser",
-    "password": "testpassword123"
+    "password": "password"
   }'
 ```
 
@@ -200,9 +161,7 @@ Save the access token from the response for use in subsequent requests:
 export ACCESS_TOKEN="your_access_token_here"
 ```
 
-### 3. Create a Status with Location Check-in
-
-You can create a status with a location check-in by providing a place name:
+### 2. Create a Status with Location Check-in
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/statuses \
@@ -215,23 +174,7 @@ curl -X POST http://localhost:8000/api/v1/statuses \
   }'
 ```
 
-The server will automatically find the coordinates for the place name and include them in the status.
-
-You can also provide coordinates directly if you have them:
-
-```bash
-curl -X POST http://localhost:8000/api/v1/statuses \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $ACCESS_TOKEN" \
-  -d '{
-    "status": "Posting from a specific location! #location",
-    "visibility": "public",
-    "latitude": 37.7749,
-    "longitude": -122.4194
-  }'
-```
-
-### 4. Upload Media
+### 3. Upload Media
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/media \
@@ -253,7 +196,7 @@ curl -X POST http://localhost:8000/api/v1/statuses \
   }'
 ```
 
-### 5. View Timelines
+### 4. View Timelines
 
 Public timeline:
 
@@ -273,39 +216,12 @@ User timeline:
 curl "http://localhost:8000/api/v1/accounts/testuser/statuses"
 ```
 
-### 6. Get Account Information
+## Recent Updates
 
-```bash
-curl http://localhost:8000/api/v1/accounts/testuser
-```
-
-### 7. WebFinger Discovery
-
-```bash
-curl "http://localhost:8000/.well-known/webfinger?resource=acct:testuser@example.com"
-```
-
-### Query Parameters
-
-The timeline endpoints support the following query parameters:
-
-- `limit`: Number of statuses to fetch (default: 20)
-- `since_id`: Return only statuses newer than this ID
-- `max_id`: Return only statuses older than this ID
-
-Example:
-
-```bash
-curl "http://localhost:8000/api/v1/timelines/public?limit=5"
-```
-
-## Future Improvements
-
-1. Enhanced federation capabilities
-2. Real-time updates
-3. Media processing and optimization
-4. Rate limiting
-5. Caching
-6. Advanced search functionality
-7. Notification system
-8. Improved location search with autocomplete
+- Added consolidated setup script (`setup_and_run.sh`)
+- Added location services with geocoding support
+- Improved media attachment handling
+- Enhanced password verification security with SHA-256 hashing
+- Added test scripts for location service
+- Fixed authentication issues
+- Updated database schema to support location data
